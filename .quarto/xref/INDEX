@@ -1,0 +1,29 @@
+{
+  "index.qmd": {
+    "index.html": "555d941d"
+  },
+  "about.qmd": {
+    "about.html": "92a9749d"
+  },
+  "resume.qmd": {
+    "resume.html": "68125040"
+  },
+  "Resume/resume.qmd": {
+    "resume.html": "eb467cb2"
+  },
+  "blog.qmd": {
+    "blog.html": "1abe9c6b"
+  },
+  "project2/index.qmd": {
+    "index.html": "1d5ef7de"
+  },
+  "project1/index.qmd": {
+    "index.html": "d7925eec"
+  },
+  "blog/project1/index.qmd": {
+    "index.html": "af9fc909"
+  },
+  "blog/project2/index.qmd": {
+    "index.html": "dc9e97ff"
+  }
+}

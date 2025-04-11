@@ -1,0 +1,13 @@
+---
+title: "Boning Yang"
+
+about:
+  template: "jolla"
+  image: "image.jpg"
+  links:
+    - icon: "envelope"
+      href: "mailto:boyang@ucsd.edu"
+    - icon: "linkedin"
+      href: "https://www.linkedin.com/in/boning-yang/"
+---
+Here's a paragraph about me :)
