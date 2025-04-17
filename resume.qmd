@@ -1,6 +1,6 @@
 ---
-title: "Resume"
+title: "Boning_Resume_副本"
 format: html
 ---
 
-{{< pdf Resume.pdf width=100% height=800 >}}
+{{< pdf Boning_Resume_副本.pdf width=100% height=800 >}}
