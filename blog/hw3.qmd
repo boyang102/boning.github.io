@@ -1,0 +1,289 @@
+---
+title: "Multinomial Logit Model"
+author: "Boning Yang"
+date: 2024-05-17
+format: html
+categories: [blog]
+---
+
+
+This assignment expores two methods for estimating the MNL model: (1) via Maximum Likelihood, and (2) via a Bayesian approach using a Metropolis-Hastings MCMC algorithm. 
+
+
+## 1. Likelihood for the Multi-nomial Logit (MNL) Model
+
+Suppose we have $i=1,\ldots,n$ consumers who each select exactly one product $j$ from a set of $J$ products. The outcome variable is the identity of the product chosen $y_i \in \{1, \ldots, J\}$ or equivalently a vector of $J-1$ zeros and $1$ one, where the $1$ indicates the selected product. For example, if the third product was chosen out of 3 products, then either $y=3$ or $y=(0,0,1)$ depending on how we want to represent it. Suppose also that we have a vector of data on each product $x_j$ (eg, brand, price, etc.). 
+
+We model the consumer's decision as the selection of the product that provides the most utility, and we'll specify the utility function as a linear function of the product characteristics:
+
+$$ U_{ij} = x_j'\beta + \epsilon_{ij} $$
+
+where $\epsilon_{ij}$ is an i.i.d. extreme value error term. 
+
+The choice of the i.i.d. extreme value error term leads to a closed-form expression for the probability that consumer $i$ chooses product $j$:
+
+$$ \mathbb{P}_i(j) = \frac{e^{x_j'\beta}}{\sum_{k=1}^Je^{x_k'\beta}} $$
+
+For example, if there are 3 products, the probability that consumer $i$ chooses product 3 is:
+
+$$ \mathbb{P}_i(3) = \frac{e^{x_3'\beta}}{e^{x_1'\beta} + e^{x_2'\beta} + e^{x_3'\beta}} $$
+
+A clever way to write the individual likelihood function for consumer $i$ is the product of the $J$ probabilities, each raised to the power of an indicator variable ($\delta_{ij}$) that indicates the chosen product:
+
+$$ L_i(\beta) = \prod_{j=1}^J \mathbb{P}_i(j)^{\delta_{ij}} = \mathbb{P}_i(1)^{\delta_{i1}} \times \ldots \times \mathbb{P}_i(J)^{\delta_{iJ}}$$
+
+Notice that if the consumer selected product $j=3$, then $\delta_{i3}=1$ while $\delta_{i1}=\delta_{i2}=0$ and the likelihood is:
+
+$$ L_i(\beta) = \mathbb{P}_i(1)^0 \times \mathbb{P}_i(2)^0 \times \mathbb{P}_i(3)^1 = \mathbb{P}_i(3) = \frac{e^{x_3'\beta}}{\sum_{k=1}^3e^{x_k'\beta}} $$
+
+The joint likelihood (across all consumers) is the product of the $n$ individual likelihoods:
+
+$$ L_n(\beta) = \prod_{i=1}^n L_i(\beta) = \prod_{i=1}^n \prod_{j=1}^J \mathbb{P}_i(j)^{\delta_{ij}} $$
+
+And the joint log-likelihood function is:
+
+$$ \ell_n(\beta) = \sum_{i=1}^n \sum_{j=1}^J \delta_{ij} \log(\mathbb{P}_i(j)) $$
+
+
+
+## 2. Simulate Conjoint Data
+
+We will simulate data from a conjoint experiment about video content streaming services. We elect to simulate 100 respondents, each completing 10 choice tasks, where they choose from three alternatives per task. For simplicity, there is not a "no choice" option; each simulated respondent must select one of the 3 alternatives. 
+
+Each alternative is a hypothetical streaming offer consistent of three attributes: (1) brand is either Netflix, Amazon Prime, or Hulu; (2) ads can either be part of the experience, or it can be ad-free, and (3) price per month ranges from \$4 to \$32 in increments of \$4.
+
+The part-worths (ie, preference weights or beta parameters) for the attribute levels will be 1.0 for Netflix, 0.5 for Amazon Prime (with 0 for Hulu as the reference brand); -0.8 for included adverstisements (0 for ad-free); and -0.1*price so that utility to consumer $i$ for hypothethical streaming service $j$ is 
+
+$$
+u_{ij} = (1 \times Netflix_j) + (0.5 \times Prime_j) + (-0.8*Ads_j) - 0.1\times Price_j + \varepsilon_{ij}
+$$
+
+where the variables are binary indicators and $\varepsilon$ is Type 1 Extreme Value (ie, Gumble) distributed.
+
+The following code provides the simulation of the conjoint data.
+
+:::: {.callout-note collapse="true"}
+```{r}
+# set seed for reproducibility
+set.seed(123)
+
+# define attributes
+brand <- c("N", "P", "H") # Netflix, Prime, Hulu
+ad <- c("Yes", "No")
+price <- seq(8, 32, by=4)
+
+# generate all possible profiles
+profiles <- expand.grid(
+    brand = brand,
+    ad = ad,
+    price = price
+)
+m <- nrow(profiles)
+
+# assign part-worth utilities (true parameters)
+b_util <- c(N = 1.0, P = 0.5, H = 0)
+a_util <- c(Yes = -0.8, No = 0.0)
+p_util <- function(p) -0.1 * p
+
+# number of respondents, choice tasks, and alternatives per task
+n_peeps <- 100
+n_tasks <- 10
+n_alts <- 3
+
+# function to simulate one respondent’s data
+sim_one <- function(id) {
+  
+    datlist <- list()
+    
+    # loop over choice tasks
+    for (t in 1:n_tasks) {
+        
+        # randomly sample 3 alts (better practice would be to use a design)
+        dat <- cbind(resp=id, task=t, profiles[sample(m, size=n_alts), ])
+        
+        # compute deterministic portion of utility
+        dat$v <- b_util[dat$brand] + a_util[dat$ad] + p_util(dat$price) |> round(10)
+        
+        # add Gumbel noise (Type I extreme value)
+        dat$e <- -log(-log(runif(n_alts)))
+        dat$u <- dat$v + dat$e
+        
+        # identify chosen alternative
+        dat$choice <- as.integer(dat$u == max(dat$u))
+        
+        # store task
+        datlist[[t]] <- dat
+    }
+    
+    # combine all tasks for one respondent
+    do.call(rbind, datlist)
+}
+
+# simulate data for all respondents
+conjoint_data <- do.call(rbind, lapply(1:n_peeps, sim_one))
+
+# remove values unobservable to the researcher
+conjoint_data <- conjoint_data[ , c("resp", "task", "brand", "ad", "price", "choice")]
+
+# clean up
+rm(list=setdiff(ls(), "conjoint_data"))
+```
+::::
+
+
+
+## 3. Preparing the Data for Estimation
+
+The "hard part" of the MNL likelihood function is organizing the data, as we need to keep track of 3 dimensions (consumer $i$, covariate $k$, and product $j$) instead of the typical 2 dimensions for cross-sectional regression models (consumer $i$ and covariate $k$). The fact that each task for each respondent has the same number of alternatives (3) helps.  In addition, we need to convert the categorical variables for brand and ads into binary variables.
+
+Fist, I am going to reshape and prepare the data:
+```{r}
+library(dplyr)
+library(readr)
+
+conjoint_data <- read_csv("conjoint_data.csv")
+
+#from categorical var to binary indicators
+conjoint_data <- conjoint_data |>
+  mutate(brand_N = ifelse(brand == "N", 1, 0), brand_P = ifelse(brand == "P", 1, 0),
+    ad_yes  = ifelse(ad == "Yes", 1, 0) )
+
+#use task ID to uniquely identify each respondent-task combo
+conjoint_data <- conjoint_data |>mutate(task_id = paste(resp, task, sep = "_"))
+head(conjoint_data)
+```
+
+
+
+## 4. Estimation via Maximum Likelihood
+
+I code up the log-likelihood function:
+```{r}
+X <- as.matrix(conjoint_data[, c("brand_N", "brand_P", "ad_yes", "price")]) #design matrix
+y <- conjoint_data$choice
+task_id <- conjoint_data$task_id
+
+log_likelihood <- function(beta) {
+  beta <- as.numeric(beta)
+  util <- X %*% beta #linear utility
+  df <- data.frame(task_id, util, y)
+  
+  ll <- df |>
+    group_by(task_id) |>
+    mutate(prob = exp(util) / sum(exp(util))) |>
+    ungroup() |>
+    summarise(loglik = sum(y * log(prob))) |>
+    pull(loglik)   #compute the log-likelihood
+   #negative log-likelihood for minimization purpose
+  return(-ll)}
+```
+
+Use `optim()` in R to find the MLEs for the 4 parameters ($\beta_\text{netflix}$, $\beta_\text{prime}$, $\beta_\text{ads}$, $\beta_\text{price}$), as well as their standard errors (from the Hessian). For each parameter construct a 95% confidence interval._
+```{r}
+# Initial guess for beta
+beta_start <- rep(0, 4)
+
+fit <- optim(par = beta_start,fn = log_likelihood,hessian = TRUE,method = "BFGS")
+mle_estimates <- fit$par
+vcov <- solve(fit$hessian) #from Hessian
+se <- sqrt(diag(vcov))
+ci_lower <- mle_estimates - 1.96 * se #95% CI
+ci_upper <- mle_estimates + 1.96 * se
+results <- data.frame(Parameter = c("beta_netflix", "beta_prime", "beta_ads", "beta_price"),
+  Estimate = round(mle_estimates, 4),StdError = round(se, 4),CI_Lower = round(ci_lower, 4),
+  CI_Upper = round(ci_upper, 4))
+
+results
+```
+
+
+
+## 5. Estimation via Bayesian Methods
+
+Now, code up a metropolis-hasting MCMC sampler of the posterior distribution. Take 11,000 steps and throw away the first 1,000, retaining the subsequent 10,000. Use N(0,5) priors for the betas on the binary variables, and a N(0,1) prior for the price beta.
+
+Instead of calculating post=lik*prior, I work in the log-space and calculate log-post = log-lik + log-prior 
+King Markov use a candidate distribution of a coin flip to decide whether to move left or right among his islands.  Unlike King Markov, we have 4 dimensions (because we have 4 betas) and our dimensions are continuous.  So, use a multivariate normal distribution to pospose the next location for the algorithm to move to. I recommend a MNV(mu, Sigma) where mu=c(0,0,0,0) and sigma has diagonal values c(0.05, 0.05, 0.05, 0.005) and zeros on the off-diagonal.  Since this MVN has no covariances, I sample each dimension independently (so 4 univariate normals instead of 1 multivariate normal), where the first 3 univariate normals are N(0,0.05) and the last one if N(0,0.005).
+```{r}
+set.seed(1)
+log_prior <- function(beta) {dnorm(beta[1], 0, sqrt(5),log= TRUE) +dnorm(beta[2], 0, sqrt(5), log=TRUE) +
+    dnorm(beta[3], 0, sqrt(5), log= TRUE)+dnorm(beta[4], 0, 1, log = TRUE)}
+
+# log posterior=log likelihood+log prior
+log_posterior <- function(beta) {-log_likelihood(beta) + log_prior(beta)}
+
+# MCMC：
+n_steps <- 11000
+beta_dim <- 4
+samples <- matrix(NA, nrow= n_steps, ncol= beta_dim)
+beta_current <- rep(0, beta_dim)
+log_post_current <- log_posterior(beta_current)
+
+proposal_sds <- c(0.05, 0.05, 0.05, 0.005)
+for (step in 1:n_steps) {
+  beta_proposal <- beta_current + rnorm(beta_dim, 0, proposal_sds)
+  log_post_proposal <- log_posterior(beta_proposal)
+
+  # Metropolis-Hastings acceptance
+  log_alpha <- log_post_proposal - log_post_current
+  if (log(runif(1)) < log_alpha) {
+    beta_current <- beta_proposal
+    log_post_current <- log_post_proposal}
+
+  samples[step, ] <- beta_current}
+samples_post <- samples[1001:11000, ]
+```
+
+
+Now, I make the trace plot of the algorithm, as well as the histogram of the posterior distribution.
+```{r}
+library(ggplot2)
+posterior_df <- data.frame(iteration = 1:nrow(samples_post),
+  beta_netflix = samples_post[, 1],
+  beta_prime   = samples_post[, 2],
+  beta_ads     = samples_post[, 3],
+  beta_price   = samples_post[, 4])
+
+ggplot(posterior_df, aes(x = iteration, y = beta_ads)) +
+  geom_line(alpha = 0.5) +
+  labs(title = "Trace Plot for beta_ads", y = "beta_ads", x = "Iteration") +
+  theme_minimal()
+
+ggplot(posterior_df, aes(x = beta_ads)) +
+  geom_histogram(bins = 50, fill = "pink", color = "white") +
+  labs(title = "Posterior Distribution for beta_ads", x = "beta_ads", y = "Frequency") +
+  theme_minimal()
+```
+
+
+I report the 4 posterior means, standard deviations, and 95% credible intervals and compare them to the results from the Maximum Likelihood approach.
+```{r}
+bayes_summary <- apply(samples_post, 2, function(x) {c(mean = mean(x), 
+    sd = sd(x),ci_lower = quantile(x, 0.025),ci_upper = quantile(x, 0.975))})
+bayes_results <- as.data.frame(t(bayes_summary))
+colnames(bayes_results) <- c("Mean", "SD", "CI_Lower", "CI_Upper")
+bayes_results$Parameter <- c("beta_netflix", "beta_prime", "beta_ads", "beta_price")
+bayes_results <- bayes_results[, c("Parameter", "Mean", "SD", "CI_Lower", "CI_Upper")]
+bayes_results
+```
+From the above two tables, you can see the posterior means and 95% credible intervals from the Bayesian MCMC are very close to the results from MLE. For the all four parameters, the differences are minimal.
+	•	For beta_netflix, the posterior mean = 0.950 vs MLE = 0.941
+	•	For beta_prime, the posterior mean = 0.510 vs MLE = 0.502
+	•	For beta_ads, the posterior mean = −0.735 vs MLE = −0.732
+	•	For beta_price, the posterior mean = −0.100 vs MLE = −0.0995
+
+Credible intervals and MLE confidence intervals also mostly overlap, and this could suggest both approaches could yield consistent and reliable estimates.
+
+## 6. Discussion
+
+Now, suppose I did not simulate the data. What will the observation be about the parameter estimates? What does $\beta_\text{Netflix} > \beta_\text{Prime}$ mean? Does it make sense that $\beta_\text{price}$ is negative?
+
+I we haven't simulated the data, the results could still make sense:
+
+First, the fact that βNetflix > βPrime indicates people tend to prefer Netflix over the Prime Video. This  assume everything else is the same and it fits with what we might expect based on brand perception. Second, the negative βprice tells us that higher prices lower the likelihood of someone choosing a plan. It is very reasonable because people usually prefer cheaper options. Last, the strong negative coefficient for ads also confirms with our intuition sincemost people don’t like ads in their streaming experience.
+
+
+At a high level, to simulate and estimate a hierarchical (random-parameter) model, I need to let each person have their own βs instead of using one set for everyone. In simulation, I draw each respondent’s β from a population distribution, such as a multivariate normal. In estimation, I would use a hierarchical model, such as hierarchical Bayes, to recover both the population-level trends and individual-level preferences.This lets me capture the real-world variation in tastes across people, which I think it is very useful.
+
+
+
