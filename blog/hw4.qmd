@@ -1,0 +1,162 @@
+---
+title: "Machine Learning"
+author: "Boning Yang"
+date: 2025-06-05
+format: html
+categories: [blog]
+---
+
+## 1a. K-Means
+
+Here I am writing my own code to implement the k-means algorithm. I make several visualizations of the various steps the algorithm takes so you could "see" the algorithm working.  Then I test the algorithm on the Palmer Penguins dataset, specifically using the bill length and flipper length variables.  In addition, I compare the results to the built-in `kmeans` function in R or Python._
+
+Further, I calculate both the within-cluster-sum-of-squares and silhouette scores (you can use built-in functions to do so) and plot the results for various numbers of clusters (ie, K=2,3,...,7). The “right” number of clusters, as suggested by the two metrics: Elbow Method and Silhouette Score, is K = 3,and I will explain this following:
+
+
+```{r}
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(dplyr)
+```
+
+```{r}
+penguins <- read.csv("~/Desktop/palmer_penguins.csv")
+
+penguins <- penguins %>%
+  filter(!is.na(bill_length_mm), !is.na(flipper_length_mm))
+
+data_numeric <- dplyr::select(penguins, bill_length_mm, flipper_length_mm)
+
+#visualize the original dataset we have
+ggplot(data_numeric, aes(x = bill_length_mm, y = flipper_length_mm)) +geom_point() +
+  labs(title = "palmer penguins data",x = "bill length in mm",y = "flipper length in mm")+theme_minimal()
+```
+```{r}
+my_kmeans <- function(data, k, max_iter= 100) {
+  set.seed(10)
+  centers <- data[sample(1:nrow(data), k), ]
+  cluster <- rep(0, nrow(data))
+  for (iter in 1:max_iter) {
+    dists <- as.matrix(dist(rbind(centers, data)))[1:k, (k+1):(k+nrow(data))]
+    cluster_new <- apply(dists, 2, which.min)
+    if (all(cluster_new == cluster)) break
+    cluster <- cluster_new
+    for (i in 1:k) {
+      if (sum(cluster == i) == 0) next
+      centers[i, ] <- colMeans(data[cluster == i, , drop = FALSE])}}
+  list(cluster = cluster, centers = centers)}
+```
+
+```{r}
+result <- my_kmeans(data_numeric, k = 3)
+plot_data <- data_numeric %>% #plot the result
+  mutate(cluster = as.factor(result$cluster))
+
+ggplot(plot_data, aes(x = bill_length_mm, y = flipper_length_mm, color = cluster)) +
+  geom_point(size= 2) +geom_point(data = as.data.frame(result$centers),
+    aes(x = bill_length_mm, y = flipper_length_mm),color = "black", size = 4, shape = 8) +
+  labs(title = "k means when k = 3",x = "bill length in mm",y = "flipper length in mm",color = "Cluster") +
+  theme_minimal()
+```
+```{r}
+km_builtin <- kmeans(data_numeric, centers= 3, nstart= 10)
+builtin_data <- data_numeric %>%
+  mutate(cluster = as.factor(km_builtin$cluster))
+#plot
+ggplot(builtin_data, aes(x = bill_length_mm, y = flipper_length_mm, color = cluster)) +
+  geom_point(size = 2) +
+  labs(title = "built-in k means when k= 3", x = "bill length in mm",
+    y = "flipper length in mm",color = "cluster")+theme_minimal()
+
+```
+
+```{r}
+# use the WSS and Silhouette to analyze multiple k
+wss <- c()
+sil <- c()
+
+for (k in 2:7) {
+  km <- kmeans(data_numeric, centers = k, nstart=10)
+  wss[k] <- km$tot.withinss
+  sil_score <- silhouette(km$cluster, dist(data_numeric))
+  sil[k] <- mean(sil_score[, 3])}
+
+#elbow method
+plot(2:7, wss[2:7], type = "b", pch = 10,xlab = "number of clusters K",
+     ylab = "within-cluster sum of squares",main = "elbow method")
+
+#silhouette method
+plot(2:7, sil[2:7], type = "b",pch = 10,xlab = "number of clusters K",
+     ylab = "average silhouette score",main = "silhouette method")
+```
+My Analysis:
+
+I performed the K-means clustering based on the bill length and flipper length measurements from Palmer Penguins dataset. Here are the things I found during my analysis:
+
+I first created the visualization of the original data in the first scatter plot above. It shows a clear structure with visible groupings,which suggests the potential clusters in the data. My hand-coded K-means algorithm has K = 3 and it successfully identified three distinct clusters. The visual separation is very strong, and the cluster centers are marked by stars. These marks could reflect the well-separated group means.
+
+I then compare it with the result from R’s built-in kmeans() function (also with K = 3) and it shows a very similar cluster structure, confirming that my hand-coded part is correct.
+
+For the Elbow Method, the within-cluster sum of squares decreases sharply from K = 2 to K = 3, and then the rate of decrease slows—indicating an elbow at K = 3. It indicates 3 is a good number of clusters.
+
+For the Silhouette Method, the silhouette score peaks at K = 2, but is still high at K = 3, after which it drops off. It demonstrates both K = 2 and K = 3 are plausible for this case, but K = 3 better captures subgroup structure without over-generalizing.
+
+
+## 2b. Key Drivers Analysis
+
+For this section, I replicate the table on slide 75 of the session 5 slides. Specifically, using the dataset provided in the file data_for_drivers_analysis.csv, calculate: pearson correlations, standardized regression coefficients, "usefulness", Shapley values for a linear regression, Johnson's relative weights, and the mean decrease in the gini coefficient from a random forest. 
+
+_If you want a challenge, add additional measures to the table such as the importance scores from XGBoost, from a Neural Network, or from any additional method that measures the importance of variables._
+
+```{r}
+library(dplyr)
+library(lm.beta)
+library(relaimpo)
+library(randomForest)
+library(iml)
+library(knitr)
+```
+
+```{r}
+df <- read.csv("~/Desktop/data_for_drivers_analysis.csv")
+y <- df$satisfaction
+X <- dplyr::select(df, -satisfaction, -brand, -id)
+lm_fit <- lm(satisfaction ~ ., data = dplyr::select(df, -brand, -id)) #linear regression model
+pearson_corr <- sapply(X, function(x) cor(x, y, use = "complete.obs")) #Pearson correlation
+std_beta <- lm.beta(lm_fit)$standardized.coefficients[-1]
+relimp <- calc.relimp(lm_fit, type = "lmg")$lmg #usefulness/LMG
+johnson <- calc.relimp(lm_fit, type = "lmg")$lmg #Johnson’s relative weights 
+predictor <- Predictor$new(model = lm_fit, data = X, y = y) #SHAP importance IML
+shap <- FeatureImp$new(predictor, loss = "mse")
+shap_values <- setNames(shap$results$importance, shap$results$feature)
+rf_model <- randomForest(x = X, y = y, importance = TRUE) #random gorest Gini
+rf_gini <- importance(rf_model, type = 2)[,1]
+```
+
+```{r}
+varnames <- colnames(X)
+driver_df <- data.frame(Perception = varnames,Pearson = pearson_corr[varnames],
+  Std_Beta = std_beta[varnames],Usefulness_LMG = relimp[varnames],
+  Johnson_Epsilon = johnson[varnames],SHAP = shap_values[varnames],RF_Gini = rf_gini[varnames])
+```
+
+```{r}
+driver_df_percent <- driver_df %>%
+  mutate(across(-Perception, ~ ifelse(is.na(.), "--", paste0(round(. * 100, 1), "%"))))
+
+colnames(driver_df_percent) <- c(
+  "Perception",
+  "Pearson Correlation",
+  "Standardized Beta Coefficient",
+  "Usefulness (LMG / Shapley)",
+  "Johnson's Epsilon",
+  "SHAP Importance",
+  "Mean Decrease in RF Gini")
+knitr::kable(driver_df_percent, caption = "Key Drivers Table", align = "lcccccc")
+```
+
+The table above shows me the trust, impact, and service are the most important factors that influencing the customer satisfaction. The finding here is consistent across all importance metrics, including the Pearson correlation, standardized regression coefficients, LMG/Shapley values, Johnson’s Epsilon, SHAP, and random forest Gini. These results suggest improving these areas is likely to have the greatest effect on overall satisfaction.
+
+
+
